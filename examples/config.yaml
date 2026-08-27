@@ -1,0 +1,44 @@
+# A complete shue configuration. Native ANSI names follow the terminal theme;
+# RGB and hex colors are converted for the selected color depth.
+palette:
+  accent: '#5f87ff'
+  warm: 'rgb(255,135,0)'
+  healthy: green
+
+rules:
+  - description: Errors take precedence over later overlapping rules
+    regex: '(?i)\b(?:error|failed|fatal|denied)\b'
+    color: 'fg:red bold'
+    exclusive: true
+
+  - description: Named capture groups can receive their own styles
+    regex: '\b(?<status>UP|DOWN|DEGRADED)\b'
+    color:
+      0: bold
+      status: 'f.healthy'
+
+  - description: PCRE2 lookbehind and lookahead
+    regex: '(?<=latency=)\d+(?:\.\d+)?(?=ms\b)'
+    color: 'fg:rgb(255,95,95) underline'
+
+  - description: Named backreference finds an immediately repeated word
+    regex: '\b(?<word>[A-Za-z]+)\s+\k<word>\b'
+    color:
+      word: 'fg:yellow underline'
+
+  - description: IPv4 addresses with a ChromaTerm-style palette reference
+    regex: '\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b'
+    color: 'f.accent'
+
+  - description: URL with native theme color and custom background
+    regex: '\bhttps?://[^[:space:]<>"]+'
+    color: 'fg:blue bg:#e6e6e6 underline'
+
+  - description: ChromaTerm foreground/background hex shorthand
+    regex: '\b(?:TODO|FIXME)\b'
+    color: 'f#ffffff b#875f00 bold'
+
+  - description: Palette value expressed as RGB
+    regex: '\b[1-5]\d{2}\s+(?:ms|milliseconds)\b'
+    color: 'f.warm'
+

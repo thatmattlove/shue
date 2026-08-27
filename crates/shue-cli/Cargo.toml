@@ -1,0 +1,27 @@
+[package]
+name = "shue"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Fast PCRE2 terminal highlighting with transparent SSH passthrough"
+readme = "../../README.md"
+
+[lib]
+name = "shue"
+path = "src/lib.rs"
+
+[[bin]]
+name = "shue"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+nix = { version = "0.28", features = ["process", "signal"] }
+shue-core = { path = "../shue-core" }
+shue-runtime = { path = "../shue-runtime" }
+signal-hook.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

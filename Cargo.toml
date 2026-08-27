@@ -1,0 +1,29 @@
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+
+[workspace.dependencies]
+anyhow = "1.0"
+crossterm = "0.29"
+pcre2 = "0.2.11"
+portable-pty = "0.9"
+rustix = { version = "1.1", features = ["fs"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = { package = "serde_norway", version = "0.9.42" }
+signal-hook = "0.3"
+tempfile = "3.20"
+thiserror = "2.0"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = true
+
+[profile.bench]
+debug = true

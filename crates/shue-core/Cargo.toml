@@ -1,0 +1,14 @@
+[package]
+name = "shue-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Binary-safe PCRE2 terminal highlighting engine for shue"
+
+[dependencies]
+pcre2.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true
+thiserror.workspace = true
+

@@ -1,0 +1,436 @@
+name: Release
+
+"on":
+  push:
+    tags:
+      - "v*"
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: 1.85.0
+  RUSTUP_TOOLCHAIN: 1.85.0
+
+jobs:
+  prepare:
+    name: Validate release tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      prerelease: ${{ steps.metadata.outputs.prerelease }}
+      source_sha: ${{ steps.metadata.outputs.source_sha }}
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Match the tag to Cargo.toml
+        id: metadata
+        env:
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python3 scripts/release.py version --tag "$TAG")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$(git rev-parse 'HEAD^{commit}')" >> "$GITHUB_OUTPUT"
+          version_without_build="${version%%+*}"
+          if [[ "$version_without_build" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  release_test:
+    name: Test release source (${{ matrix.os }})
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            quality: true
+          - os: macos-15
+            quality: false
+    env:
+      PCRE2_SYS_STATIC: "1"
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the minimum Rust toolchain
+        shell: bash
+        run: >-
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          --component clippy --component rustfmt
+
+      - name: Test every workspace target with locked dependencies
+        shell: bash
+        run: >-
+          cargo +"$RUST_VERSION" test --workspace --all-targets --locked
+
+      - name: Enforce formatting and Clippy
+        if: matrix.quality
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +"$RUST_VERSION" fmt --all -- --check
+          cargo +"$RUST_VERSION" clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: Enforce MIT-only project licensing
+        if: matrix.quality
+        run: ./scripts/check-license-policy.sh
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-15
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-24.04
+    env:
+      PCRE2_SYS_STATIC: "1"
+      TARGET: ${{ matrix.target }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Linux musl toolchain
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes musl-tools
+          target_key="${TARGET//-/_}"
+          cargo_key="${target_key^^}"
+          echo "CC_${target_key}=musl-gcc" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_${cargo_key}_LINKER=musl-gcc" >> "$GITHUB_ENV"
+
+      - name: Install Rust
+        shell: bash
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal --target "$TARGET"
+
+      - name: Build the optimized binary
+        shell: bash
+        run: cargo +"$RUST_VERSION" build --release --locked -p shue --bin shue --target "$TARGET"
+
+      - name: Verify architecture, linkage, and version
+        run: python3 scripts/release.py verify --target "$TARGET" --version "$VERSION"
+
+      - name: Package the binary and licenses
+        shell: bash
+        run: |
+          test "$(git rev-parse 'HEAD^{commit}')" = "$SOURCE_SHA"
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct "${SOURCE_SHA}^{commit}")"
+          python3 scripts/release.py package --target "$TARGET" --version "$VERSION"
+
+      - name: Upload the release archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: dist/shue-v${{ needs.prepare.outputs.version }}-${{ matrix.target }}.tar.gz
+          archive: false
+          if-no-files-found: error
+          retention-days: 7
+
+  bundle:
+    name: Assemble release bundle
+    needs: [prepare, release_test, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Check out release tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare an isolated bundle directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -e "$RUNNER_TEMP/shue-release-bundle" ]]; then
+            echo "release bundle path unexpectedly exists" >&2
+            exit 1
+          fi
+          mkdir "$RUNNER_TEMP/shue-release-bundle"
+
+      - name: Download the binary archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: shue-v*.tar.gz
+          path: ${{ runner.temp }}/shue-release-bundle
+          merge-multiple: true
+          skip-decompress: true
+
+      - name: Validate archives and generate checksums
+        run: >-
+          python3 scripts/release.py checksums --version "$VERSION"
+          --directory "$RUNNER_TEMP/shue-release-bundle"
+
+      - name: Generate the stable Homebrew formula
+        if: needs.prepare.outputs.prerelease == 'false'
+        run: >-
+          python3 scripts/release.py formula
+          --repository "$REPOSITORY"
+          --version "$VERSION"
+          --checksums "$RUNNER_TEMP/shue-release-bundle/SHA256SUMS"
+          --output "$RUNNER_TEMP/shue-release-bundle/shue.rb"
+
+      - name: Validate the stable bundle manifest
+        if: needs.prepare.outputs.prerelease == 'false'
+        run: >-
+          python3 scripts/release.py validate-bundle
+          --version "$VERSION"
+          --directory "$RUNNER_TEMP/shue-release-bundle" --require-formula
+
+      - name: Validate the prerelease bundle manifest
+        if: needs.prepare.outputs.prerelease == 'true'
+        run: >-
+          python3 scripts/release.py validate-bundle
+          --version "$VERSION" --directory "$RUNNER_TEMP/shue-release-bundle"
+
+      - name: Upload the complete release bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-bundle
+          path: ${{ runner.temp }}/shue-release-bundle/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub release
+    needs: [prepare, bundle, release_test]
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+      SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+    steps:
+      - name: Download the release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-bundle
+          path: ${{ runner.temp }}/shue-release-bundle
+
+      - name: Create the immutable release candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          resolved_sha="$(gh api "repos/$REPOSITORY/commits/$TAG" --jq .sha)"
+          if [[ "$resolved_sha" != "$SOURCE_SHA" ]]; then
+            echo "release tag moved from $SOURCE_SHA to $resolved_sha" >&2
+            exit 1
+          fi
+          arguments=(--repo "$REPOSITORY" --verify-tag --generate-notes --title "shue $VERSION")
+          if [[ "$PRERELEASE" == "true" ]]; then
+            arguments+=(--prerelease)
+          fi
+          gh release create "$TAG" "$RUNNER_TEMP/shue-release-bundle"/* \
+            "${arguments[@]}"
+
+  homebrew_test:
+    name: Test Homebrew (${{ matrix.os }})
+    if: needs.prepare.outputs.prerelease == 'false'
+    needs: [prepare, publish]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            audit: false
+          - os: macos-15-intel
+            audit: false
+          - os: ubuntu-24.04-arm
+            audit: false
+          - os: ubuntu-24.04
+            audit: true
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TEST_TAP: shue/release-test
+      FORMULA_REF: shue/release-test/shue
+    steps:
+      - name: Download the published formula
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-bundle
+          path: ${{ runner.temp }}/shue-release-bundle
+
+      - name: Add Homebrew to PATH on Linux
+        if: runner.os == 'Linux'
+        run: echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+
+      - name: Stage the formula in a temporary tap
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew tap-new --no-git "$TEST_TAP"
+          tap_directory="$(brew --repository "$TEST_TAP")"
+          mkdir -p "$tap_directory/Formula"
+          cp "$RUNNER_TEMP/shue-release-bundle/shue.rb" \
+            "$tap_directory/Formula/shue.rb"
+
+      - name: Check formula style
+        run: brew style --formula "$FORMULA_REF"
+
+      - name: Audit every formula platform branch
+        if: matrix.audit
+        run: >-
+          brew audit --strict --online --formula --os=all --arch=all
+          "$FORMULA_REF"
+
+      - name: Install and test the released formula
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install --formula "$FORMULA_REF"
+          brew test "$FORMULA_REF"
+          test "$(shue --version)" = "shue $VERSION"
+          documentation="$(brew --prefix "$FORMULA_REF")/share/doc/shue"
+          former_license="LICENSE-A""PACHE"
+          test -f "$documentation/LICENSE-MIT"
+          test ! -e "$documentation/$former_license"
+          test -f "$documentation/THIRD-PARTY-LICENSES.txt"
+
+      - name: Remove the temporary formula and tap
+        if: always()
+        shell: bash
+        run: |
+          brew uninstall --force "$FORMULA_REF" || true
+          brew untap --force "$TEST_TAP" || true
+
+  homebrew_publish:
+    name: Update Homebrew tap
+    if: needs.prepare.outputs.prerelease == 'false'
+    needs: [prepare, publish, homebrew_test]
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAP_REPOSITORY: ${{ vars.HOMEBREW_TAP_REPOSITORY || format('{0}/homebrew-tap', github.repository_owner) }}
+    steps:
+      - name: Download the tested formula
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-bundle
+          path: ${{ runner.temp }}/shue-release-bundle
+
+      - name: Check out the release comparison tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: source
+          persist-credentials: false
+
+      - name: Validate the tap repository name
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAP_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/homebrew-[A-Za-z0-9_.-]+$ ]]; then
+            echo "HOMEBREW_TAP_REPOSITORY must be owner/homebrew-name" >&2
+            exit 1
+          fi
+
+      - name: Check out the Homebrew tap
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.TAP_REPOSITORY }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+          fetch-depth: 0
+
+      - name: Atomically publish a non-downgrading formula
+        shell: bash
+        run: |
+          set -euo pipefail
+          tap_branch="$(git -C homebrew-tap branch --show-current)"
+          if [[ -z "$tap_branch" ]]; then
+            echo "Homebrew tap checkout has no current branch" >&2
+            exit 1
+          fi
+          git -C homebrew-tap config user.name "github-actions[bot]"
+          git -C homebrew-tap config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          for attempt in 1 2 3 4; do
+            git -C homebrew-tap fetch --no-tags origin \
+              "+refs/heads/$tap_branch:refs/remotes/origin/$tap_branch"
+            git -C homebrew-tap checkout -B shue-release \
+              "refs/remotes/origin/$tap_branch"
+
+            if [[ ! -f homebrew-tap/Formula/shue.rb ]] && \
+              [[ -n "$(git -C homebrew-tap log --diff-filter=AM -1 \
+                --format=%H -- Formula/shue.rb)" ]]; then
+              echo "Formula/shue.rb was deliberately removed; refusing resurrection" >&2
+              exit 1
+            fi
+
+            python3 source/scripts/release.py tap-check \
+              --candidate "$RUNNER_TEMP/shue-release-bundle/shue.rb" \
+              --current homebrew-tap/Formula/shue.rb \
+              --version "$VERSION"
+            mkdir -p homebrew-tap/Formula
+            cp "$RUNNER_TEMP/shue-release-bundle/shue.rb" \
+              homebrew-tap/Formula/shue.rb
+            git -C homebrew-tap add Formula/shue.rb
+            git -C homebrew-tap diff --cached --check
+            if git -C homebrew-tap diff --cached --quiet; then
+              echo "Formula/shue.rb is already current"
+              exit 0
+            fi
+            git -C homebrew-tap commit -m "shue $VERSION"
+            if git -C homebrew-tap push origin "HEAD:refs/heads/$tap_branch"; then
+              exit 0
+            fi
+            echo "Tap changed concurrently; retrying ($attempt/4)" >&2
+          done
+          echo "Homebrew tap changed during every publication attempt" >&2
+          exit 1
