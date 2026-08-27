@@ -217,16 +217,16 @@ so the wrapped command or filter continues with its output unchanged.
 1. `--config PATH`
 2. `SHUE_CONFIG`
 3. `$XDG_CONFIG_HOME/shue/config.yaml`, then `config.yml`; when
-   `XDG_CONFIG_HOME` is unset, `$HOME/.config` is used
-4. `$HOME/.chromaterm.yml`, then `$HOME/.chromaterm.yaml`
-5. `$XDG_CONFIG_HOME/chromaterm/chromaterm.yml`, then `chromaterm.yaml`
-6. for each `XDG_CONFIG_DIRS` entry, native `shue/config.yaml` and
-   `config.yml`, then legacy `chromaterm/chromaterm.yml` and
-   `chromaterm.yaml`; the XDG default is `/etc/xdg`
-7. `/etc/shue/config.yaml`, `/etc/shue/config.yml`,
-   `/etc/chromaterm/chromaterm.yml`, and
-   `/etc/chromaterm/chromaterm.yaml`
-8. embedded defaults
+   `XDG_CONFIG_HOME` is unset, `$HOME/.config/shue/config.yaml`, then
+   `$HOME/.config/shue/config.yml`
+4. for each absolute `XDG_CONFIG_DIRS` entry, `shue/config.yaml`, then
+   `shue/config.yml`; the XDG default is `/etc/xdg`
+5. `/etc/shue/config.yaml`, then `/etc/shue/config.yml`
+6. embedded defaults
+
+Automatic discovery only checks Shue-specific locations. Move an existing
+configuration to `$XDG_CONFIG_HOME/shue/config.yaml`, or select another path
+explicitly with `--config` or `SHUE_CONFIG`.
 
 The embedded defaults are safe, theme-native rules for good/warning/error
 states, IPv4 and IPv6 addresses, URLs, and standalone numbers. Shue never

@@ -31,8 +31,8 @@ fn documentation_and_licenses_cover_the_public_contract() {
         "--config",
         "SHUE_CONFIG",
         "XDG_CONFIG_HOME",
-        ".chromaterm.yml",
-        "/etc/chromaterm/chromaterm.yml",
+        "$HOME/.config/shue/config.yaml",
+        "/etc/shue/config.yaml",
         "embedded defaults",
         "auto",
         "ansi16",
@@ -68,6 +68,16 @@ fn documentation_and_licenses_cover_the_public_contract() {
     // fixture before trusting its result against the real README.
     assert_eq!(first_placeholder("unfinished TODO text"), Some("TODO"));
     assert_eq!(first_placeholder(&readme), None, "README has a placeholder");
+    for unsupported in [
+        concat!(".chroma", "term.yml"),
+        concat!(".chroma", "term.yaml"),
+        concat!("/chroma", "term/"),
+    ] {
+        assert!(
+            !readme.contains(unsupported),
+            "README advertises unsupported config target {unsupported:?}"
+        );
+    }
     assert!(
         !readme.contains("stop startup"),
         "README contains the obsolete fatal-config contract"

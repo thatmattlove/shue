@@ -22,13 +22,23 @@ fn parsing_discovery_environment_controls_and_help_are_deterministic() {
     fs::create_dir_all(&home).unwrap();
 
     let yaml = write_config(&user, "shue/config.yaml", "rules: []\n# yaml-first\n");
-    let _yml = write_config(&user, "shue/config.yml", "rules: []\n# yml-second\n");
-    let legacy_yml = write_config(&home, ".chromaterm.yml", "rules: []\n# legacy-yml\n");
-    let legacy_yaml = write_config(&home, ".chromaterm.yaml", "rules: []\n# legacy-yaml\n");
+    let yml = write_config(&user, "shue/config.yml", "rules: []\n# yml-second\n");
+    let _foreign_home_yml = write_config(&home, ".chromaterm.yml", "rules: []\n# must-not-load\n");
+    let _foreign_home_yaml =
+        write_config(&home, ".chromaterm.yaml", "rules: []\n# must-not-load\n");
+    let _foreign_user_yml = write_config(
+        &user,
+        "chromaterm/chromaterm.yml",
+        "rules: []\n# must-not-load\n",
+    );
     let system_yaml = write_config(&system, "shue/config.yaml", "rules: []\n# system-yaml\n");
-    let _system_yml = write_config(&system, "shue/config.yml", "rules: []\n# system-yml\n");
+    let system_yml = write_config(&system, "shue/config.yml", "rules: []\n# system-yml\n");
+    let _foreign_system_yml = write_config(
+        &system,
+        "chromaterm/chromaterm.yml",
+        "rules: []\n# must-not-load\n",
+    );
     let search = ConfigSearch {
-        home: Some(home.clone()),
         user_config_dir: Some(user.clone()),
         system_config_dirs: vec![system.clone()],
     };
@@ -45,24 +55,23 @@ fn parsing_discovery_environment_controls_and_help_are_deterministic() {
     );
     assert!(second.contents.contains("yml-second"));
 
-    fs::remove_file(user.join("shue/config.yml")).expect("remove second native extension");
-    let selected_legacy = load_config(None, None, &search).expect("discover legacy YML config");
-    assert_eq!(
-        selected_legacy.origin,
-        ConfigOrigin::Discovered(legacy_yml.clone())
-    );
-    fs::remove_file(&legacy_yml).expect("remove first legacy extension");
-    let selected_legacy = load_config(None, None, &search).expect("discover legacy YAML config");
-    assert_eq!(
-        selected_legacy.origin,
-        ConfigOrigin::Discovered(legacy_yaml.clone())
-    );
-    fs::remove_file(&legacy_yaml).expect("remove second legacy extension");
+    fs::remove_file(&yml).expect("remove second user extension");
     let selected_system = load_config(None, None, &search).expect("discover system config");
     assert_eq!(
         selected_system.origin,
-        ConfigOrigin::Discovered(system_yaml)
+        ConfigOrigin::Discovered(system_yaml.clone())
     );
+    fs::remove_file(&system_yaml).expect("remove first system extension");
+    let selected_system = load_config(None, None, &search).expect("discover system YML config");
+    assert_eq!(
+        selected_system.origin,
+        ConfigOrigin::Discovered(system_yml.clone())
+    );
+    fs::remove_file(&system_yml).expect("remove second system extension");
+
+    let embedded = load_config(None, None, &search).expect("ignore non-Shue config targets");
+    assert_eq!(embedded.origin, ConfigOrigin::Embedded);
+    assert_eq!(embedded.contents, EMBEDDED_DEFAULT_CONFIG);
 
     let environment = write_config(root, "environment.yml", "rules: []\n# environment\n");
     let explicit = write_config(root, "explicit.yml", "rules: []\n# explicit\n");
@@ -78,7 +87,6 @@ fn parsing_discovery_environment_controls_and_help_are_deterministic() {
         None,
         None,
         &ConfigSearch {
-            home: None,
             user_config_dir: None,
             system_config_dirs: vec![root.join("absent")],
         },

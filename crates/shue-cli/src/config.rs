@@ -63,7 +63,6 @@ pub struct LoadedConfig {
 /// Inputs used to build deterministic config search paths.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConfigSearch {
-    pub home: Option<PathBuf>,
     pub user_config_dir: Option<PathBuf>,
     pub system_config_dirs: Vec<PathBuf>,
 }
@@ -91,7 +90,6 @@ impl ConfigSearch {
         }
 
         Self {
-            home,
             user_config_dir,
             system_config_dirs,
         }
@@ -105,33 +103,9 @@ impl ConfigSearch {
             push_unique(&mut candidates, config_dir.join("shue/config.yaml"));
             push_unique(&mut candidates, config_dir.join("shue/config.yml"));
         }
-        if let Some(home) = &self.home {
-            // ChromaTerm2 checks this historical home-directory file first
-            // among its own locations. Shue checks its native XDG path first.
-            push_unique(&mut candidates, home.join(".chromaterm.yml"));
-            push_unique(&mut candidates, home.join(".chromaterm.yaml"));
-        }
-        if let Some(config_dir) = &self.user_config_dir {
-            push_unique(
-                &mut candidates,
-                config_dir.join("chromaterm/chromaterm.yml"),
-            );
-            push_unique(
-                &mut candidates,
-                config_dir.join("chromaterm/chromaterm.yaml"),
-            );
-        }
         for config_dir in &self.system_config_dirs {
             push_unique(&mut candidates, config_dir.join("shue/config.yaml"));
             push_unique(&mut candidates, config_dir.join("shue/config.yml"));
-            push_unique(
-                &mut candidates,
-                config_dir.join("chromaterm/chromaterm.yml"),
-            );
-            push_unique(
-                &mut candidates,
-                config_dir.join("chromaterm/chromaterm.yaml"),
-            );
         }
         candidates
     }
@@ -216,9 +190,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn candidates_have_native_legacy_and_system_order() {
+    fn candidates_have_native_user_and_system_order() {
         let search = ConfigSearch {
-            home: Some(PathBuf::from("/home/test")),
             user_config_dir: Some(PathBuf::from("/xdg/user")),
             system_config_dirs: vec![PathBuf::from("/xdg/system"), PathBuf::from("/etc")],
         };
@@ -227,18 +200,10 @@ mod tests {
             vec![
                 PathBuf::from("/xdg/user/shue/config.yaml"),
                 PathBuf::from("/xdg/user/shue/config.yml"),
-                PathBuf::from("/home/test/.chromaterm.yml"),
-                PathBuf::from("/home/test/.chromaterm.yaml"),
-                PathBuf::from("/xdg/user/chromaterm/chromaterm.yml"),
-                PathBuf::from("/xdg/user/chromaterm/chromaterm.yaml"),
                 PathBuf::from("/xdg/system/shue/config.yaml"),
                 PathBuf::from("/xdg/system/shue/config.yml"),
-                PathBuf::from("/xdg/system/chromaterm/chromaterm.yml"),
-                PathBuf::from("/xdg/system/chromaterm/chromaterm.yaml"),
                 PathBuf::from("/etc/shue/config.yaml"),
                 PathBuf::from("/etc/shue/config.yml"),
-                PathBuf::from("/etc/chromaterm/chromaterm.yml"),
-                PathBuf::from("/etc/chromaterm/chromaterm.yaml"),
             ]
         );
     }
