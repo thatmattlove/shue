@@ -1,0 +1,11 @@
+Network health check
+
+edge-router   192.0.2.1       UP        latency 3 ms
+core-switch   192.0.2.10      OK        ports 48
+api-gateway   2001:db8::1     ONLINE    connections 128
+backup-link   198.51.100.20   DEGRADED  loss 12 %
+replica       198.51.100.21   RETRYING  attempt 3
+worker        203.0.113.8     FAILED    exit 1
+
+Health: https://status.example.net/health
+Checks: 24 passed, 2 warning, 1 error
