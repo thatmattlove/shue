@@ -1,5 +1,6 @@
 # A complete shue configuration. Native ANSI names follow the terminal theme;
 # RGB and hex colors are converted for the selected color depth.
+---
 palette:
   accent: '#5f87ff'
   warm: 'rgb(255,135,0)'
@@ -41,4 +42,3 @@ rules:
   - description: Palette value expressed as RGB
     regex: '\b[1-5]\d{2}\s+(?:ms|milliseconds)\b'
     color: 'f.warm'
-
