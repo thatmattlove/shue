@@ -1,4 +1,4 @@
-# shue
+# `shue`
 
 `shue` highlights terminal output with configurable rules. It wraps your normal
 SSH client by default, runs other programs, or filters stdin. Existing terminal
@@ -168,4 +168,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development, verification, and releas
 
 ## License
 
-![GitHub License](https://img.shields.io/github/license/thatmattlove/shue?style=for-the-badge)
+[![MIT License](https://img.shields.io/github/license/thatmattlove/shue?style=for-the-badge)](LICENSE)
