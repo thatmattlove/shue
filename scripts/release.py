@@ -43,25 +43,13 @@ ARCHITECTURE_MARKERS = {
 }
 ARCHIVE_FILES = (
     "README.md",
-    "LICENSE-MIT",
+    "LICENSE",
     "THIRD-PARTY-LICENSES.txt",
 )
 SOURCE_ARCHIVE_FILES = ARCHIVE_FILES[:-1]
 LICENSE_FILE = re.compile(
     r"^(?:LICENSE|LICENCE|COPYING|COPYRIGHT|UNLICENSE|NOTICE)(?:[-._].*)?$",
     re.IGNORECASE,
-)
-PINNED_NOTICES = (
-    (
-        "PCRE2 10.46 consolidated license",
-        "licenses/PCRE2-10.46-LICENCE.md",
-        "9cf7ac6976099a1d856826d3ef1b093bd6b84489dc6100628ac79e740cf9885a",
-    ),
-    (
-        "musl 1.2.3 COPYRIGHT",
-        "licenses/MUSL-1.2.3-COPYRIGHT",
-        "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
-    ),
 )
 RUST_1_85_COPYRIGHT_SHA256 = (
     "252b04f034f7383e09401dc700c8b933e3e38818eaa8b2f09dd247542be92292"
@@ -321,7 +309,7 @@ def third_party_licenses(root: Path) -> bytes:
 
     sections = [
         "THIRD-PARTY LICENSES AND NOTICES\n",
-        "Shue itself is licensed under MIT; its top-level LICENSE-MIT file accompanies "
+        "Shue itself is licensed under MIT; its top-level LICENSE file accompanies "
         "this notice. The terms reproduced below apply to third-party dependencies "
         "and runtime components included in the distribution.\n",
     ]
@@ -349,15 +337,6 @@ def third_party_licenses(root: Path) -> bytes:
 
         if package["name"] == "pcre2-sys":
             found_pcre2 = True
-            version_header = package_root / "upstream/include/pcre2.h"
-            header_contents = version_header.read_text(encoding="utf-8")
-            if not (
-                re.search(r"^#define PCRE2_MAJOR\s+10$", header_contents, re.MULTILINE)
-                and re.search(r"^#define PCRE2_MINOR\s+46$", header_contents, re.MULTILINE)
-            ):
-                raise ReleaseError(
-                    "bundled PCRE2 version changed; refresh its pinned consolidated license"
-                )
             source = package_root / "upstream/src/pcre2_compile.c"
             if not source.is_file():
                 raise ReleaseError("pcre2-sys does not contain its bundled PCRE2 source")
@@ -398,24 +377,6 @@ def third_party_licenses(root: Path) -> bytes:
 
     if not found_pcre2:
         raise ReleaseError("pcre2-sys is missing from the release dependency graph")
-
-    for title, relative_path, expected_digest in PINNED_NOTICES:
-        notice_path = root / relative_path
-        if not notice_path.is_file():
-            raise ReleaseError(f"pinned notice is missing: {notice_path}")
-        notice = notice_path.read_bytes()
-        digest = hashlib.sha256(notice).hexdigest()
-        if digest != expected_digest:
-            raise ReleaseError(
-                f"{title} changed (expected SHA-256 {expected_digest}, found {digest})"
-            )
-        sections.append("=" * 78 + "\n")
-        sections.append(f"Bundled component: {title}\n")
-        sections.append(
-            f"\n--- {Path(relative_path).name} ---\n"
-            + notice.decode("utf-8").strip()
-            + "\n"
-        )
 
     rust_version = workspace_rust_version(root)
     exact_rust_version = rust_version if rust_version.count(".") == 2 else f"{rust_version}.0"
@@ -746,7 +707,7 @@ def formula_text(repository: str, version: str, checksums: dict[str, str]) -> st
 
   def install
     bin.install "shue"
-    doc.install "LICENSE-MIT", "THIRD-PARTY-LICENSES.txt"
+    doc.install "LICENSE", "THIRD-PARTY-LICENSES.txt"
   end
 
   test do

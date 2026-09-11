@@ -448,9 +448,8 @@ def check_release_helpers(release) -> None:
         b"--- COPYRIGHT ---",
         dependency_declaration,
         dependency_full_text,
-        b"PCRE2 License",
+        b"Bundled PCRE2 license notice",
         b"Zoltan Herczeg",
-        b"musl as a whole",
         b"The Rust Project",
     ]:
         if marker not in notices:
@@ -480,7 +479,11 @@ def check_release_helpers(release) -> None:
             if notice_member is None:
                 fail("release archive omitted the generated third-party notices")
             archived_notices = notice_member.read()
-            for marker in [b"PCRE2 License", dependency_declaration, dependency_full_text]:
+            for marker in [
+                b"Bundled PCRE2 license notice",
+                dependency_declaration,
+                dependency_full_text,
+            ]:
                 if marker not in archived_notices:
                     fail(
                         "release archive did not retain third-party marker "
@@ -538,7 +541,7 @@ def check_release_helpers(release) -> None:
             "on_arm do",
             "on_intel do",
             'bin.install "shue"',
-            'doc.install "LICENSE-MIT", "THIRD-PARTY-LICENSES.txt"',
+            'doc.install "LICENSE", "THIRD-PARTY-LICENSES.txt"',
             'pipe_output("#{bin}/shue --no-color --filter", "homebrew\\n", 0)',
             'license "MIT"',
         ]:

@@ -10,7 +10,7 @@ import tomllib
 
 
 ROOT = Path(__file__).resolve().parent.parent
-IGNORED_DIRECTORIES = {".git", ".unlazy", "licenses", "target"}
+IGNORED_DIRECTORIES = {".git", ".unlazy", "target"}
 FORMER_LICENSE = "Apa" + "che"
 
 
@@ -62,7 +62,7 @@ def main() -> int:
         fail(f"former project-license references remain in {violations!r}")
 
     root_license_files = sorted(path.name for path in ROOT.glob("LICENSE*") if path.is_file())
-    if root_license_files != ["LICENSE-MIT"]:
+    if root_license_files != ["LICENSE"]:
         fail(f"unexpected top-level license files: {root_license_files!r}")
 
     with (ROOT / "Cargo.toml").open("rb") as manifest:
@@ -76,13 +76,13 @@ def main() -> int:
             fail(f"{manifest_path.relative_to(ROOT)} does not inherit the workspace license")
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    if "Shue is licensed under the MIT License. See `LICENSE-MIT`." not in readme:
+    if "`shue` is licensed under the MIT License. See [LICENSE](LICENSE)." not in readme:
         fail("README does not declare the MIT-only project license")
 
     release = load_release_helper()
     expected_archive_files = (
         "README.md",
-        "LICENSE-MIT",
+        "LICENSE",
         "THIRD-PARTY-LICENSES.txt",
     )
     if release.ARCHIVE_FILES != expected_archive_files:
@@ -93,7 +93,7 @@ def main() -> int:
     formula = release.formula_text("owner/shue", "1.2.3", checksums)
     if '  license "MIT"' not in formula:
         fail("generated Homebrew formula does not declare MIT")
-    if 'doc.install "LICENSE-MIT", "THIRD-PARTY-LICENSES.txt"' not in formula:
+    if 'doc.install "LICENSE", "THIRD-PARTY-LICENSES.txt"' not in formula:
         fail("generated Homebrew formula does not install the MIT license and notices")
     if contains_former_license(formula):
         fail("generated Homebrew formula retains the former project license")

@@ -334,7 +334,7 @@ jobs:
           test "$(shue --version)" = "shue $VERSION"
           documentation="$(brew --prefix "$FORMULA_REF")/share/doc/shue"
           former_license="LICENSE-A""PACHE"
-          test -f "$documentation/LICENSE-MIT"
+          test -f "$documentation/LICENSE"
           test ! -e "$documentation/$former_license"
           test -f "$documentation/THIRD-PARTY-LICENSES.txt"
 

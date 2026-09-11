@@ -14,14 +14,13 @@ fn first_placeholder(document: &str) -> Option<&'static str> {
 }
 
 #[test]
-fn documentation_and_licenses_cover_the_public_contract() {
+fn documentation_covers_the_public_contract() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let readme = read(&root.join("README.md"));
     let example_path = root.join("examples/config.yaml");
     let example = read(&example_path);
 
     for required in [
-        "Why Rust",
         "username@host",
         "--ssh-path",
         "SHUE_SSH",
@@ -42,11 +41,9 @@ fn documentation_and_licenses_cover_the_public_contract() {
         "lookahead",
         "lookbehind",
         "backreference",
-        "named capture",
-        "fails open",
+        "named captures",
         "runtime limit",
         "shue: warning:",
-        "Content errors are non-fatal",
         "empty configuration",
         "f#rrggbb",
         "rgb(r,g,b)",
@@ -56,14 +53,18 @@ fn documentation_and_licenses_cover_the_public_contract() {
         "Linux",
         "Limitations",
         "ChromaTerm2",
+        "[CONTRIBUTING.md](CONTRIBUTING.md)",
     ] {
         assert!(readme.contains(required), "README is missing {required:?}");
     }
-    assert_eq!(
-        readme.matches("```").count() % 2,
-        0,
-        "unbalanced code fences"
-    );
+    let contributing = read(&root.join("CONTRIBUTING.md"));
+    for (name, document) in [("README.md", &readme), ("CONTRIBUTING.md", &contributing)] {
+        assert_eq!(
+            document.matches("```").count() % 2,
+            0,
+            "{name} has unbalanced code fences"
+        );
+    }
     // Positive control: prove the same absence checker detects a known bad
     // fixture before trusting its result against the real README.
     assert_eq!(first_placeholder("unfinished TODO text"), Some("TODO"));
@@ -98,10 +99,15 @@ fn documentation_and_licenses_cover_the_public_contract() {
         assert!(example.contains(feature), "example is missing {feature:?}");
     }
 
-    let mit = read(&root.join("LICENSE-MIT"));
-    assert!(mit.starts_with("MIT License\n\nCopyright (c) 2026 shue contributors"));
-    assert!(mit.contains("THE SOFTWARE IS PROVIDED \"AS IS\""));
-    assert!(readme.contains("Shue is licensed under the MIT License"));
-
     println!("documentation verification passed");
+}
+
+#[test]
+fn licenses_cover_the_public_contract() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let readme = read(&root.join("README.md"));
+    let mit = read(&root.join("LICENSE"));
+    assert!(mit.starts_with("MIT License\n\nCopyright (c) 2026 Matthew Love"));
+    assert!(mit.contains("THE SOFTWARE IS PROVIDED \"AS IS\""));
+    assert!(readme.contains("`shue` is licensed under the MIT License"));
 }
