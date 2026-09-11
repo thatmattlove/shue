@@ -1,0 +1,593 @@
+# Coverage: Arista EOS · Juniper JunOS · Cisco IOS/NX-OS · Cumulus · kubectl · Python · Linux/systemd
+# Colors: Theme-native ANSI palette (adapts to the active terminal theme)
+# Rule ordering matters: exclusive patterns lock text early; specific keyword rules
+# come last so they override broad generic rules on conflict.
+
+---
+palette:
+  # Network addresses
+  ipv4: bright-cyan
+  ipv6: bright-magenta
+  mac: magenta
+
+  # Network elements
+  iface: magenta
+  asnum: bright-yellow
+  vlan: cyan
+
+  # Status
+  good: green
+  warn: yellow
+  bad: red
+
+  # General
+  number: bright-yellow
+  size: cyan
+  url: bright-blue
+  keyword: bright-magenta
+  datetime: bright-black  # theme-defined gray; timestamps are everywhere
+  subtle: bright-black  # debug and low-priority information
+  info: bright-cyan   # log INFO and headers
+  comment: black
+
+  # Prompt highlighting
+  prompt-host: bright-black
+  prompt-mode: bright-yellow  # mode context such as (config-if-X)
+  prompt-char: bright-cyan     # prompt character: # > $ %
+
+rules:
+
+  # ═══════════════════════════════════════════════════════════
+  # DEVICE PROMPTS
+  # Must be FIRST — exclusive flag locks hostname text so address/
+  # interface/number rules don't re-color it.
+  # Covers: Arista EOS · Cisco IOS/IOS-XE/NX-OS · Juniper JunOS ·
+  #         Cumulus · generic Linux · Palo Alto PAN-OS · Fortinet FortiOS
+  # ═══════════════════════════════════════════════════════════
+
+  - description: Prompt Arista Cisco NOS
+    regex: '(?:^|\r)([\w][\w.-]*)(\([\w\/.-]+\))?([#>])'
+    color:
+      1: f.prompt-host bold
+      2: f.prompt-mode bold
+      3: f.prompt-char bold
+    exclusive: true
+
+  - description: Prompt Juniper PAN-OS Linux Cumulus
+    regex: '(?:^|\r)([\w][\w.-]*@[\w][\w.-]*)(:[^#$%>]*)?([>#$%])'
+    color:
+      1: f.prompt-host bold
+      2: f.prompt-mode
+      3: f.prompt-char bold
+    exclusive: true
+
+  - description: Prompt Fortinet FortiOS
+    regex: '(?:^|\r)([\w][\w.-]*)(\s+\([\w-]+\))?\s+([#])'
+    color:
+      1: f.prompt-host bold
+      2: f.prompt-mode
+      3: f.prompt-char bold
+    exclusive: true
+
+  # ═══════════════════════════════════════════════════════════
+  # NETWORK DEVICE CONFIGURATION COMMENTS
+  # Prompt rules stay above these so a device's # prompt is not
+  # mistaken for a configuration comment. Comments are exclusive
+  # so addresses, numbers, and status words inside them stay subdued.
+  # ═══════════════════════════════════════════════════════════
+
+  - description: Configuration comment — Arista Cisco FRR (!)
+    regex: '^[ \t]*![^\r\n]*$'
+    color: f.comment
+    exclusive: true
+
+  - description: Configuration comment — Junos Cumulus FortiOS NX-OS (#)
+    regex: '^[ \t]*#[^\r\n]*$'
+    color: f.comment
+    exclusive: true
+
+  - description: Configuration comment — Junos block annotation (single line)
+    regex: '/\*[^*\r\n]*(?:\*(?!/)[^*\r\n]*)*\*/'
+    color: f.comment
+    exclusive: true
+
+  - description: Configuration comment — Cisco Arista ACL remark
+    regex: '(?i)^[ \t]*(?:(?:\d+[ \t]+)?remark\b|access-list[ \t]+\S+[ \t]+remark\b)[^\r\n]*$'
+    color: f.comment
+    exclusive: true
+
+  - description: Interface description value
+    regex: |
+      (?ix)^
+      (?:
+          [ \t]+description[ \t]+
+          (?<hier>\S(?:[^\r\n]*?[^;\s])?)
+        |
+          [ \t]*set[ \t]+interfaces[ \t]+
+          (?:(?:interface-range[ \t]+\S+)|\S+)
+          (?:[ \t]+unit[ \t]+\d+)?[ \t]+description[ \t]+
+          (?<setval>\S(?:[^\r\n]*?[^;\s])?)
+      )
+      [ \t]*;?[ \t]*$
+    color:
+      hier: f.comment
+      setval: f.comment
+    exclusive: true
+
+  # ═══════════════════════════════════════════════════════════
+  # EXCLUSIVE PATTERNS
+  # These lock matched text so subsequent rules cannot re-color it.
+  # Must come before number/keyword rules.
+  # ═══════════════════════════════════════════════════════════
+
+  - description: Size / Bandwidth (1G, 100Gbps, 4.5MB, 10Kbps)
+    regex: '(?i)\b(?<![\da-f]{2}:)\d+(\.\d+)?\s?((([KMGTPEZY](i?B)?)|B)(ps)?)(?!:[\da-f]{2})\b'
+    color:
+      0: f.size bold
+    exclusive: true
+
+  - description: URL (http/https/ftp/ssh/grpc/telnet)
+    regex: |
+      (?ix)\b
+          ((htt|ft|lda)ps?|telnet|ssh|grpc)://
+          ([-%:\w\\/]{1,256}@)?
+          [-\w]{1,63}(\.[-\w]{1,63}){0,126}(:\d{1,5})?
+          (/[-+=~@%&?#.:;,\w\\/()]*)?
+      ((?=[.:;,)])|\b)
+    color: f.url
+    exclusive: true
+
+  - description: IPv4 address (with optional /prefix)
+    regex: '\b(?<!\.)((25[0-5]|(2[0-4]|[0-1]?\d)?\d)\.){3}(25[0-5]|(2[0-4]|[0-1]?\d)?\d)(?<prefix>/\d+)?\b'
+    color:
+      0: f.ipv4
+      prefix: f.number
+    exclusive: true
+
+  - description: IPv6 address (with optional /prefix and zone index)
+    regex: |
+      (?ix)(?<![\w:])(
+          ([\da-f]{1,4}:){7}[\da-f]{1,4}|
+          [\da-f]{1,4}:(:[\da-f]{1,4}){1,6}|
+          ([\da-f]{1,4}:){1,2}(:[\da-f]{1,4}){1,5}|
+          ([\da-f]{1,4}:){1,3}(:[\da-f]{1,4}){1,4}|
+          ([\da-f]{1,4}:){1,4}(:[\da-f]{1,4}){1,3}|
+          ([\da-f]{1,4}:){1,5}(:[\da-f]{1,4}){1,2}|
+          ([\da-f]{1,4}:){1,6}:[\da-f]{1,4}|
+          ([\da-f]{1,4}:){1,7}:|
+          :((:[\da-f]{1,4}){1,7}|:)
+      )(:(?=\W))?
+      (%[\da-z]+)?
+      (?<prefix>/\d+)?
+      (?!:?\w)
+    color:
+      0: f.ipv6
+      prefix: f.number
+    exclusive: true
+
+  - description: MAC address — colon notation (aa:bb:cc:dd:ee:ff)
+    regex: '(?i)\b(?<!:)([\da-f]{2}:){5}[\da-f]{2}(?!:)\b'
+    color: f.mac
+    exclusive: true
+
+  - description: MAC address — dot notation / Cisco-Arista (aabb.ccdd.eeff)
+    regex: '(?i)\b(?<!\.)([\da-f]{4}\.){2}[\da-f]{4}(?!\.)\b'
+    color: f.mac
+    exclusive: true
+
+  - description: Interface — Juniper style (xe-0/0/0, et-0/0/0.100, ae0, lo0, irb.10, fxp0)
+    regex: '\b(xe|et|ge|fe|ae|lo|irb|fxp|em|vme|reth|fab|lt|gr|st0|ms|me|pp0|vt)-?\d+(/\d+(/\d+)?)?(\.\d+)?\b'
+    color: f.iface bold
+    exclusive: true
+
+  - description: Interface — Arista/Cisco long form
+    regex: '\b(Ethernet|Port-Channel|Loopback|Management|Vlan|GigabitEthernet|TenGigabitEthernet|HundredGigabitEthernet|FortyGigabitEthernet|TwentyFiveGigE|FastEthernet|Bundle-Ether|BVI|Tunnel|Serial)[\d/.:]+\b'
+    color: f.iface bold
+    exclusive: true
+
+  - description: Interface — Arista/Cisco short form (Et1, Po10, Lo0, Ma0, Vl100, Hu1)
+    regex: '\b(Et|Po|Lo|Ma|Vl|Mg|Gi|Te|Hu|Fo|Fa|Se|Tu|BE)\d[\d/.]*\b'
+    color: f.iface
+    exclusive: true
+
+  - description: Interface — Cumulus/Linux (swp1, swp1s0, bond0)
+    regex: '\b(swp\d+(s\d+)?|bond\d+)\b'
+    color: f.iface
+    exclusive: true
+
+  - description: Date (YYYY-MM-DD, DD/MM/YYYY, MMM DD, etc.)
+    regex: |
+      (?ix)\b(
+          (\d{2}|\d{4})(?P<sep1>[-/])(0?[1-9]|1[0-2])(?P=sep1)(3[0-1]|[1-2]\d|0?[1-9])|
+          (3[0-1]|[1-2]\d|0?[1-9])(?P<sep2>[-/])(0?[1-9]|1[0-2])(?P=sep2)(\d{2}|\d{4})|
+          (0?[1-9]|1[0-2])(?P<sep3>[-/])(3[0-1]|[1-2]\d|0?[1-9])(?P=sep3)(\d{2}|\d{4})|
+          (jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+(
+              (3[0-1]|[1-2]\d|0?[1-9])(\s+\d{4})?|\d{4}
+          )|(3[0-1]|[1-2]\d|0?[1-9])\s(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)(?!\s+(3[0-1]|[1-2]\d|0?[1-9])([^\w:]|$))(\s+\d{4})?
+      )((?=[\WT_])|$)
+    color: f.datetime
+    exclusive: true
+
+  - description: Time (HH:MM with optional seconds, sub-seconds, timezone)
+    regex: |
+      (?ix)(?<![\.:])(\b|(?<=T))
+          (2[0-3]|[0-1]\d):[0-5]\d
+          (:[0-5]\d([\.,]\d{3,6})?)?
+          ([\-\+](\d{2}|\d{4})|Z)?
+      (?![\.:])\b
+    color: f.datetime
+    exclusive: true
+
+  # ═══════════════════════════════════════════════════════════
+  # NUMBERS (after exclusive patterns have claimed their text)
+  # ═══════════════════════════════════════════════════════════
+
+  - description: Numbers — general integers and decimals
+    regex: '\b(?<!\.)\d+(\.\d+)?(?!\.)\b'
+    color: f.number
+
+  # ═══════════════════════════════════════════════════════════
+  # GENERIC STATUS (broad — overridden by specific rules below)
+  # ═══════════════════════════════════════════════════════════
+
+  - description: Generic — Good
+    regex: '(?i)\b(up|ok(ay)?|accept(s|ed)?|enabled?|online|success(ful|fully)?|connected|reachable|valid|forwarding|synchronized|healthy|ready|running|start(ed|ing)?|listen(ing)?|passed|complete(d)?|authorized)\b'
+    color: f.good
+
+  - description: Generic — Warning / ambiguous
+    regex: '(?i)\b(warn(ing)?|reset(t?ing)?|discard(ed|ing)?|block(ed|ing)?|filter(ed|ing)?|stop(p(ed|ing))?|never|timeout|expired|missing|incomplete|unknown|degraded|flapping|unsynchronized|mismatch|degrad(ed|ing)?)\b'
+    color: f.warn
+
+  - description: Generic — Bad
+    regex: '(?i)\b(down|lost?|los(ing)?|err(ors?)?|den(y|ies|ied)?|reject(ing|ed)?|drop(ped|s)?|disabled?|timed?\-?out|fail(s|ed|ure)?|disconnect(ed)?|unreachable|invalid|inaccessible|wrong|collision|runts|abnormal(ly)?|notconnect|unusable|blk|err\-?disabled|abort(ed)?|crash(ed)?|fault(ed)?)\b'
+    color: f.bad
+
+  # ═══════════════════════════════════════════════════════════
+  # ACL / POLICY — PERMIT / DENY
+  # ═══════════════════════════════════════════════════════════
+
+  - description: Policy / ACL — permit
+    regex: '(?i)\b(permit)\b'
+    color: f.good bold
+
+  - description: Policy / ACL — deny
+    regex: '(?i)\b(deny)\b'
+    color: f.bad bold
+
+  # ═══════════════════════════════════════════════════════════
+  # ROUTING TABLE ENTRY TYPES
+  # ═══════════════════════════════════════════════════════════
+
+  - description: Route type — BGP (B, B E, B I)
+    regex: '^\s+(B\s+[IE]?)\s+\d'
+    color:
+      1: f.ipv6 bold
+
+  - description: Route type — OSPF (O, O IA, O E1, O E2, O N1, O N2)
+    regex: '^\s+(O(?:\s+(?:IA|E[12]|N[12]))?)\s+\d'
+    color:
+      1: f.warn bold
+
+  - description: Route type — Connected (C) and Local (L)
+    regex: '^\s+([CL])\s+\d'
+    color:
+      1: f.good bold
+
+  - description: Route type — Static (S, S*)
+    regex: '^\s+(S\*?)\s+\d'
+    color:
+      1: f.keyword bold
+
+  - description: Route type — IS-IS (i, ia)
+    regex: '^\s+(i\s+(?:ia\s+)?)\d'
+    color:
+      1: f.info bold
+
+  - description: Route type — Juniper protocol in brackets ([BGP/170], [OSPF/10])
+    regex: '\[(BGP|OSPF|ISIS|IS-IS|Static|Direct|Local|RIP|Aggregate|EVPN|LDP|MPLS)\b'
+    color: f.keyword bold
+
+  # ═══════════════════════════════════════════════════════════
+  # INTERFACE STATES
+  # ═══════════════════════════════════════════════════════════
+
+  - description: Interface — operationally up
+    regex: '(?i)\b(is up|line protocol is up|Physical link is Up|link state up|Link is Up)\b'
+    color: f.good bold
+
+  - description: Interface — operationally down
+    regex: '(?i)\b(is down|line protocol is down|Physical link is Down|link state down|Link is Down|lowerlayerdown|notpresent|sfpAbsent)\b'
+    color: f.bad bold
+
+  - description: Interface — shutdown in running config
+    regex: '^\s{1,8}shutdown\s*$'
+    color: b.bad
+
+  - description: Interface — no shutdown in running config
+    regex: '^\s{1,8}no shutdown\s*$'
+    color: f.good
+
+  - description: Interface — admin down / err-disabled
+    regex: '(?i)\b(admin.?down|err.?disabled|administratively down)\b'
+    color: f.bad bold
+
+  - description: Interface — notconnect / not present
+    regex: '(?i)\b(notconnect|not connect|sfpAbsent|channelDown)\b'
+    color: f.bad
+
+  - description: Interface — Input rate line
+    regex: 'Input rate\s*:\s[\d,]+ bps'
+    color: f.good
+
+  - description: Interface — Output rate line
+    regex: 'Output rate\s*:\s[\d,]+ bps'
+    color: f.warn
+
+  - description: Interface — Last flapped / last changed
+    regex: '(?i)(Last flapped|Last flap|Last clearing|Last change)\s*:?\s.+$'
+    color: f.datetime
+
+  - description: 'Interface — show interface header (Physical interface: xe-0/0/0)'
+    regex: '^Physical interface:\s+\S+'
+    color: f.iface bold
+
+  # ═══════════════════════════════════════════════════════════
+  # BGP SESSION STATES
+  # Comes AFTER generic good/bad so it overrides on conflict.
+  # "Active" (capital-A) = BGP not-established = red.
+  # "active" (lowercase) = generic good (systemd etc.) = green.
+  # ═══════════════════════════════════════════════════════════
+
+  - description: BGP — Established (green bold)
+    regex: '\b(Established|Establ|Estab)\b'
+    color: f.good bold
+
+  - description: BGP — Non-established states (red bold)
+    regex: '\b(Idle|Active|Connect|OpenSent|OpenConfirm|NoNeg|ACTIVE|IDLE)\b'
+    color: f.bad bold
+
+  - description: BGP — local AS number
+    regex: '(?i)(local AS number|local-as)\s+(\d+)'
+    color:
+      2: f.asnum bold
+
+  - description: BGP — remote-as / peer AS
+    regex: '(?i)(remote.as|peer.as)\s+(\d+)'
+    color:
+      2: f.asnum
+
+  - description: BGP — VRF context in summary header
+    regex: '^BGP summary information for (VRF \S+)'
+    color:
+      1: f.keyword
+
+  - description: BGP — VRF name in route table header
+    regex: '^VRF name:\s+\S+'
+    color: f.keyword
+
+  # ═══════════════════════════════════════════════════════════
+  # OSPF NEIGHBOR STATES
+  # ═══════════════════════════════════════════════════════════
+
+  - description: OSPF — Full adjacency (green bold)
+    regex: '\b(Full|FULL|2Way|2WAY)\b'
+    color: f.good bold
+
+  - description: OSPF — Transitional states (orange bold)
+    regex: '\b(Loading|Exchange|Exstart|ExStart|LOADING|EXCHANGE|EXSTART)\b'
+    color: f.warn bold
+
+  - description: OSPF — Down / Init states (red bold)
+    regex: '\b(INIT|Init|ATTEMPT|DOWN(?=\b))\b'
+    color: f.bad bold
+
+  # ═══════════════════════════════════════════════════════════
+  # LACP / MLAG / PORT-CHANNEL
+  # ═══════════════════════════════════════════════════════════
+
+  - description: LACP — bundled / active member (green)
+    regex: '(?i)\b(bundled|selected)\b'
+    color: f.good
+
+  - description: LACP — not bundled / individual / suspended (red)
+    regex: '(?i)\b(not bundled|individual|suspended|standby)\b'
+    color: f.bad
+
+  # ═══════════════════════════════════════════════════════════
+  # VRF / VLAN / VNI
+  # ═══════════════════════════════════════════════════════════
+
+  - description: VRF name keyword
+    regex: '(?i)\b(vrf)\s+(\S+)'
+    color:
+      2: f.keyword
+
+  - description: VLAN / VNI ID
+    regex: '(?i)\b(vlan|vni)\s+(\d+)\b'
+    color:
+      0: f.vlan
+
+  # ═══════════════════════════════════════════════════════════
+  # AS NUMBERS (standalone)
+  # ═══════════════════════════════════════════════════════════
+
+  - description: AS number (AS 65001)
+    regex: '(?<!\w)AS\s*(\d+)\b'
+    color:
+      0: f.asnum
+
+  # ═══════════════════════════════════════════════════════════
+  # ROUTE-MAP / PREFIX-LIST / ACL CONFIG
+  # ═══════════════════════════════════════════════════════════
+
+  - description: Route-map name
+    regex: '(?i)(route-map\s+)(\S+)'
+    color:
+      2: f.keyword bold
+
+  - description: Prefix-list name
+    regex: '(?i)(prefix-list\s+)(\S+)'
+    color:
+      2: f.keyword bold
+
+  - description: IP access-list name
+    regex: '(?i)(ip\s+access-list\s+)(\S+)'
+    color:
+      2: f.keyword bold
+
+  - description: Route-map / prefix-list sequence number
+    regex: '(?i)\s(permit|deny)\s+(\d+)\s*$'
+    color:
+      2: f.number bold
+
+  - description: Route-map set clause
+    regex: '^\s{2,6}set\s+.+$'
+    color: f.keyword
+
+  - description: Route-map match clause
+    regex: '^\s{2,6}match\s+.+$'
+    color: f.info
+
+  - description: Prefix-list ge / le / eq constraints
+    regex: '(?i)\b(ge\s+\d+|le\s+\d+|eq\s+\d+)\b'
+    color: f.keyword
+
+  # ═══════════════════════════════════════════════════════════
+  # JUNIPER-SPECIFIC
+  # ═══════════════════════════════════════════════════════════
+
+  - description: Juniper — commit complete (green bold)
+    regex: '(?i)commit complete'
+    color: f.good bold
+
+  - description: Juniper — commit / error (red bold)
+    regex: '(?i)(error:.*commit|commit.*fail|mgd: error)'
+    color: f.bad bold
+
+  - description: Juniper — security policy from-zone / to-zone
+    regex: '(from-zone\s+\S+\s+)(to-zone\s+\S+)'
+    color:
+      1: f.good
+      2: f.bad
+
+  - description: Juniper — set security policy line
+    regex: '^(set security policies\s+)'
+    color: f.keyword
+
+  - description: Juniper — match / then stanza keywords
+    regex: '^\s+(match|then)\s*\{'
+    color: f.info
+
+  - description: Juniper — source-address / destination-address
+    regex: '(source-address|destination-address)\s+(\S+)'
+    color:
+      1: f.keyword
+      2: f.keyword bold
+
+  # ═══════════════════════════════════════════════════════════
+  # KUBERNETES / KUBECTL
+  # ═══════════════════════════════════════════════════════════
+
+  - description: kubectl — Running / Completed / Succeeded (green bold)
+    regex: '\b(Running|Completed|Succeeded)\b'
+    color: f.good bold
+
+  - description: kubectl — Pending / Initializing / Terminating (orange bold)
+    regex: '\b(Pending|ContainerCreating|PodInitializing|Terminating|Unknown|Init:[0-9]+/[0-9]+)\b'
+    color: f.warn bold
+
+  - description: kubectl — Error states (red bold)
+    regex: '\b(CrashLoopBackOff|Error|ImagePullBackOff|ErrImagePull|OOMKilled|Evicted|Failed|InvalidImageName|CreateContainerConfigError|RunContainerError|ImageInspectError|BackOff)\b'
+    color: f.bad bold
+
+  # ═══════════════════════════════════════════════════════════
+  # LOG LEVELS / SYSLOG
+  # ═══════════════════════════════════════════════════════════
+
+  - description: Log — CRITICAL / EMERGENCY / ALERT (red bold)
+    regex: '(?i)\b(CRITICAL|EMERGENCY|EMERG|ALERT)\b'
+    color: f.bad bold
+
+  - description: Log — ERROR (red)
+    regex: '(?i)\b(ERROR|ERR)\b'
+    color: f.bad
+
+  - description: Log — WARNING (orange)
+    regex: '(?i)\b(WARNING|WARN)\b'
+    color: f.warn
+
+  - description: Log — NOTICE / INFO (sky blue)
+    regex: '(?i)\b(NOTICE|INFO)\b'
+    color: f.info
+
+  - description: Log — DEBUG / TRACE (grey)
+    regex: '(?i)\b(DEBUG|TRACE)\b'
+    color: f.subtle
+
+  # ═══════════════════════════════════════════════════════════
+  # PYTHON / SCRIPT OUTPUT
+  # ═══════════════════════════════════════════════════════════
+
+  - description: Python — Traceback header (orange bold)
+    regex: '^Traceback \(most recent call last\):'
+    color: f.warn bold
+
+  - description: Python — Exception type and message (red bold)
+    regex: '^\w*(\w+Error|\w+Exception):\s.+$'
+    color: f.bad bold
+
+  # ═══════════════════════════════════════════════════════════
+  # SYSTEMD SERVICE STATUS
+  # ═══════════════════════════════════════════════════════════
+
+  - description: Systemd — Active running (green bold)
+    regex: 'Active:\s+active \(running\)'
+    color: f.good bold
+
+  - description: Systemd — Failed / restarting (red bold)
+    regex: 'Active:\s+(failed|activating \(auto-restart\))'
+    color: f.bad bold
+
+  - description: Systemd — Inactive (orange)
+    regex: 'Active:\s+inactive'
+    color: f.warn
+
+  # ═══════════════════════════════════════════════════════════
+  # SSH / CONNECTIVITY MESSAGES
+  # ═══════════════════════════════════════════════════════════
+
+  - description: SSH — connection error / closed / refused (red bold)
+    regex: '(?i)(Connection (closed|refused|reset|timed out)|Permission denied|Host key verification failed|Network is unreachable|No route to host|Connection to .+ closed|packet_write_wait|ssh: connect to host)'
+    color: f.bad bold
+
+  - description: SSH — last login / welcome (subtle grey)
+    regex: '(?i)(Last login:|Welcome to|Authorized users only)'
+    color: f.subtle
+
+  # ═══════════════════════════════════════════════════════════
+  # LINUX / SHELL
+  # ═══════════════════════════════════════════════════════════
+
+  - description: Linux — file permission string (subtle)
+    regex: '^[-dlcbsp]([-r][-w][x-]){3}'
+    color: f.subtle
+
+  - description: Linux — sudo / root context (orange bold)
+    regex: '(?i)(sudo|root@\S+)'
+    color: f.warn bold
+
+  - description: Linux — non-zero exit code / return value (red)
+    regex: '(?i)(exit code [1-9]\d*|returned [1-9]\d*|rc=[1-9]\d*|exit status [1-9]\d*)'
+    color: f.bad
+
+  - description: Linux — command not found (red)
+    regex: '(?i)(command not found|No such file or directory|Permission denied)'
+    color: f.bad bold
+
+  # ═══════════════════════════════════════════════════════════
+  # DURATION / UPTIME FORMATS
+  # ═══════════════════════════════════════════════════════════
+
+  - description: Duration — network uptime formats (1d02h, 2w3d, 5h30m, never)
+    regex: '\b((\d+w)?\d+d(\d+h)?|\d+h\d+m|\d+:\d{2}:\d{2})\b'
+    color: f.datetime
