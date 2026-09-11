@@ -13,8 +13,6 @@ YAML configuration and PCRE2 regex support.
 
 ![shue highlighting statuses, IP addresses, URLs, and numbers in a sample network log](docs/assets/shue-demo.gif)
 
-Default rules on a sample network log. [Still image](docs/assets/shue-demo.png).
-
 > [!NOTE]
 > `shue` is almost 100% vibe-coded.
 
@@ -24,7 +22,7 @@ Supports macOS and Linux on Apple Silicon/ARM64 and x86-64.
 
 ### Homebrew
 
-```console
+```
 brew install thatmattlove/tap/shue
 ```
 
@@ -41,7 +39,7 @@ Download an archive and `SHA256SUMS` from [Releases](../../releases):
 
 Verify and install the downloaded archive (example: ARM64 macOS, v0.1.0):
 
-```console
+```bash
 set -eu
 VERSION=0.1.0
 TARGET=aarch64-apple-darwin
@@ -61,7 +59,7 @@ For source builds, see [CONTRIBUTING.md](CONTRIBUTING.md#development).
 
 Use your usual SSH arguments, with shue options first:
 
-```console
+```bash
 shue username@host
 shue --color-depth truecolor -p 2222 username@host
 shue -J bastion.example.net username@host show interfaces
@@ -78,7 +76,7 @@ Shue selects the SSH client from `--ssh-path PATH`, then `SHUE_SSH`, then
 
 Use `--exec` to wrap a program, or `--filter` to highlight stdin:
 
-```console
+```bash
 shue --exec ping -c 4 192.0.2.1
 shue --config ./rules.yaml --exec tail -f /var/log/system.log
 journalctl -b | shue --filter | less -R
@@ -170,4 +168,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development, verification, and releas
 
 ## License
 
-`shue` is licensed under the MIT License. See [LICENSE](LICENSE).
+![GitHub License](https://img.shields.io/github/license/thatmattlove/shue?style=for-the-badge)
