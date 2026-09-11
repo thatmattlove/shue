@@ -5,14 +5,16 @@ mod common;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::process::{Child, Command, Output, Stdio};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use common::{EMPTY_CONFIG, error_text, output_text, shue_command, write_config, write_program};
+use common::{
+    EMPTY_CONFIG, TestDeadline, error_text, output_text, shue_command, write_config, write_program,
+};
 use nix::errno::Errno;
 use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
@@ -106,6 +108,7 @@ fn wait_with_output_deadline(mut child: Child, cleanup_pids: &[i32], description
 
 #[test]
 fn direct_ssh_precedence_passthrough_and_exit_codes() {
+    let _deadline = TestDeadline::start("direct_ssh_precedence_passthrough_and_exit_codes");
     let temporary = tempdir().expect("temporary directory");
     let root = temporary.path();
     let config = write_config(root, "empty.yml", EMPTY_CONFIG);
@@ -292,6 +295,16 @@ wait "$worker""#,
     assert_process_gone(closed_child_pid);
     assert_process_gone(closed_descendant_pid);
 
+    println!("shue end-to-end verification passed");
+}
+
+#[test]
+fn mixed_terminal_input_and_redirected_stdout_exit_cleanly() {
+    let _deadline = TestDeadline::start("mixed_terminal_input_and_redirected_stdout_exit_cleanly");
+    let temporary = tempdir().expect("temporary directory");
+    let root = temporary.path();
+    let config = write_config(root, "empty.yml", EMPTY_CONFIG);
+
     // Mixed descriptors are common for `shue host | tee`: stdin remains the
     // foreground TTY while stdout is redirected. The wrapped child must stay
     // in that foreground process group so its terminal read is not stopped by
@@ -310,7 +323,14 @@ printf '%s\n' "$input" > "$marker""#,
         &root.join("tty-harness"),
         "tty-harness",
         "tty-harness",
-        r#"exec "$1" --no-color --config "$2" --exec "$3" "$4" > "$5""#,
+        // More than a PTY buffer of startup output makes missing output
+        // draining fail reliably, including on platforms without exit drain.
+        r#"i=0
+while [ "$i" -lt 8192 ]; do
+  printf 'terminal startup output\n'
+  i=$((i + 1))
+done
+exec "$1" --no-color --config "$2" --exec "$3" "$4" > "$5""#,
     );
     let tty_arguments = vec![
         OsString::from(env!("CARGO_BIN_EXE_shue")),
@@ -325,6 +345,17 @@ printf '%s\n' "$input" > "$marker""#,
         TerminalSize::default(),
     )
     .expect("spawn mixed-descriptor PTY harness");
+    // macOS drains the controlling terminal when a session leader exits.
+    // Even echoed input and the harness banner can otherwise deadlock wait().
+    let mut reader = outer_terminal
+        .try_clone_reader()
+        .expect("clone mixed-descriptor PTY reader");
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let mut output = Vec::new();
+        let result = reader.read_to_end(&mut output).map(|_| output);
+        let _ = sender.send(result);
+    });
     let mut terminal_writer = outer_terminal
         .take_writer()
         .expect("take mixed-descriptor PTY writer");
@@ -345,11 +376,29 @@ printf '%s\n' "$input" > "$marker""#,
         fs::read_to_string(&tty_read_marker).expect("TTY read marker"),
         "foreground-input\n"
     );
-    assert_eq!(
-        outer_terminal
-            .wait()
-            .expect("wait for mixed-descriptor harness"),
-        0
+    let exit_deadline = Instant::now() + Duration::from_secs(3);
+    let exit_code = loop {
+        if let Some(code) = outer_terminal
+            .try_wait()
+            .expect("poll mixed-descriptor harness")
+        {
+            break code;
+        }
+        assert!(
+            Instant::now() < exit_deadline,
+            "mixed-descriptor harness did not exit after reading terminal input"
+        );
+        thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(exit_code, 0);
+    let terminal_output = receiver
+        .recv_timeout(Duration::from_secs(3))
+        .expect("mixed-descriptor PTY did not reach EOF")
+        .expect("read mixed-descriptor terminal output");
+    assert!(terminal_output.len() > 128 * 1024);
+    assert!(
+        String::from_utf8_lossy(&terminal_output).contains("PROGRAM:tty-harness"),
+        "harness output did not reach the PTY reader"
     );
     assert!(
         fs::read_to_string(&redirected_output)
@@ -358,5 +407,5 @@ printf '%s\n' "$input" > "$marker""#,
         "wrapped program output did not reach redirected stdout"
     );
 
-    println!("shue end-to-end verification passed");
+    println!("mixed-descriptor PTY verification passed");
 }

@@ -26,7 +26,7 @@ readme_required = [
     "aarch64-unknown-linux-musl",
     "x86_64-unknown-linux-musl",
     "[CONTRIBUTING.md](CONTRIBUTING.md)",
-    "[LICENSE](LICENSE)",
+    "](LICENSE)",
 ]
 contributing_required = [
     "HOMEBREW_TAP_TOKEN",

@@ -3,9 +3,38 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+
+// A panic cannot rescue a test stuck inside a blocking child wait or
+// destructor. Declare this guard before the test's other owned resources.
+pub struct TestDeadline(mpsc::Sender<()>);
+
+impl TestDeadline {
+    pub fn start(name: &'static str) -> Self {
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            if matches!(
+                receiver.recv_timeout(Duration::from_secs(30)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ) {
+                eprintln!("{name} exceeded its 30-second deadline; terminating the test process");
+                std::process::exit(1);
+            }
+        });
+        Self(sender)
+    }
+}
+
+impl Drop for TestDeadline {
+    fn drop(&mut self) {
+        let _ = self.0.send(());
+    }
+}
 
 pub fn shue_command() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_shue"));

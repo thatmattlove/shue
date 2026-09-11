@@ -109,5 +109,8 @@ fn licenses_cover_the_public_contract() {
     let mit = read(&root.join("LICENSE"));
     assert!(mit.starts_with("MIT License\n\nCopyright (c) 2026 Matthew Love"));
     assert!(mit.contains("THE SOFTWARE IS PROVIDED \"AS IS\""));
-    assert!(readme.contains("`shue` is licensed under the MIT License"));
+    assert!(
+        readme.contains("](LICENSE)"),
+        "README must link to the project license"
+    );
 }

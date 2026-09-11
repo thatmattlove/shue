@@ -10,7 +10,9 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use common::{RED_CONFIG, error_text, shue_command, strip_sgr, write_config, write_program};
+use common::{
+    RED_CONFIG, TestDeadline, error_text, shue_command, strip_sgr, write_config, write_program,
+};
 use shue_runtime::{PtySession, TerminalSize};
 use tempfile::tempdir;
 
@@ -34,8 +36,40 @@ fn filter(config: &std::path::Path, extra: &[&str], input: &[u8]) -> std::proces
     child.wait_with_output().expect("wait for filter")
 }
 
+fn read_until(
+    receiver: &mpsc::Receiver<Vec<u8>>,
+    output: &mut Vec<u8>,
+    needle: &[u8],
+    timeout: Duration,
+) -> bool {
+    let deadline = Instant::now() + timeout;
+    while !output.windows(needle.len()).any(|window| window == needle) {
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            return false;
+        };
+        let Ok(chunk) = receiver.recv_timeout(remaining) else {
+            return false;
+        };
+        output.extend(chunk);
+    }
+    true
+}
+
+fn wait_for_pty_exit(terminal: &mut PtySession) -> u32 {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        if let Some(code) = terminal.try_wait().expect("poll PTY-wrapped shue") {
+            return code;
+        }
+        assert!(Instant::now() < deadline, "PTY-wrapped shue did not exit");
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
 #[test]
 fn filter_and_exec_are_colored_binary_safe_and_recover_cleanly() {
+    let _deadline =
+        TestDeadline::start("filter_and_exec_are_colored_binary_safe_and_recover_cleanly");
     let temporary = tempdir().expect("temporary directory");
     let config = write_config(temporary.path(), "rules.yml", RED_CONFIG);
     let input = b"\xffID:ERROR!\n";
@@ -215,32 +249,32 @@ fn filter_and_exec_are_colored_binary_safe_and_recover_cleanly() {
             }
         }
     });
-    let deadline = Instant::now() + Duration::from_millis(700);
     let mut prompt_output = Vec::new();
-    while Instant::now() < deadline {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        let Ok(chunk) = receiver.recv_timeout(remaining) else {
-            break;
-        };
-        prompt_output.extend_from_slice(&chunk);
-        if prompt_output
-            .windows(truecolor_sgr.len())
-            .any(|window| window == truecolor_sgr)
-        {
-            break;
-        }
-    }
+    // Process startup can be slow on a busy runner. Start the display-latency
+    // deadline once the child's startup banner reaches the terminal.
     assert!(
-        prompt_output
-            .windows(truecolor_sgr.len())
-            .any(|window| window == truecolor_sgr),
+        read_until(
+            &receiver,
+            &mut prompt_output,
+            b"PROGRAM:prompt",
+            Duration::from_secs(5),
+        ),
+        "interactive child did not start: {prompt_output:?}"
+    );
+    assert!(
+        read_until(
+            &receiver,
+            &mut prompt_output,
+            truecolor_sgr,
+            Duration::from_millis(700),
+        ),
         "interactive prompt was not idle-flushed: {prompt_output:?}"
     );
     writer
         .write_all(b"\n")
         .expect("send input after observing prompt");
     writer.flush().expect("flush outer PTY input");
-    assert_eq!(terminal.wait().expect("wait for PTY-wrapped shue"), 0);
+    assert_eq!(wait_for_pty_exit(&mut terminal), 0);
 
     // CR-delimited progress updates can arrive continuously, so the idle path
     // never runs. They still need a wall-clock writer flush; this producer
@@ -300,35 +334,32 @@ printf '%s\n' done > "$done_file""#,
             }
         }
     });
-    let progress_deadline = Instant::now() + Duration::from_secs(1);
     let mut progress_output = Vec::new();
-    let progress_needle = b"progress-";
-    while Instant::now() < progress_deadline {
-        let remaining = progress_deadline.saturating_duration_since(Instant::now());
-        let Ok(chunk) = progress_receiver.recv_timeout(remaining) else {
-            break;
-        };
-        progress_output.extend_from_slice(&chunk);
-        if progress_output
-            .windows(progress_needle.len())
-            .any(|window| window == progress_needle)
-        {
-            break;
-        }
-    }
-    let progress_visible = progress_output
-        .windows(progress_needle.len())
-        .any(|window| window == progress_needle);
+    assert!(
+        read_until(
+            &progress_receiver,
+            &mut progress_output,
+            b"PROGRAM:continuous-control",
+            Duration::from_secs(5),
+        ),
+        "progress child did not start: {progress_output:?}"
+    );
+    let progress_visible = read_until(
+        &progress_receiver,
+        &mut progress_output,
+        b"progress-",
+        Duration::from_secs(1),
+    );
     if !progress_visible || progress_done.exists() {
         let _ = progress_terminal.terminate();
-        let _ = progress_terminal.wait();
+        let _ = wait_for_pty_exit(&mut progress_terminal);
         panic!(
             "continuous CR output was not flushed on time: visible={progress_visible}, done={}, output={progress_output:?}",
             progress_done.exists()
         );
     }
     fs::write(&progress_stop, b"stop\n").expect("stop progress producer");
-    assert_eq!(progress_terminal.wait().expect("wait for progress PTY"), 0);
+    assert_eq!(wait_for_pty_exit(&mut progress_terminal), 0);
     assert_eq!(
         fs::read_to_string(&progress_done).expect("progress completion marker"),
         "done\n"

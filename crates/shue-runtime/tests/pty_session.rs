@@ -5,6 +5,9 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::PermissionsExt;
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use shue_runtime::{PtySession, TerminalSize};
 use tempfile::TempDir;
@@ -13,6 +16,83 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack
         .windows(needle.len())
         .any(|window| window == needle)
+}
+
+fn poll_exit(session: &mut PtySession) -> u32 {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        if let Some(code) = session.try_wait().expect("poll PTY child") {
+            return code;
+        }
+        assert!(Instant::now() < deadline, "PTY child did not exit in time");
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn dropping_session_with_unread_output_finishes() {
+    // Keep the deadline outside the process exercising Drop: a blocked
+    // destructor must not prevent the test harness from reporting failure.
+    let mut helper = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--ignored",
+            "--exact",
+            "drop_with_unread_output_helper",
+            "--nocapture",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn PTY drop helper");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let timed_out = loop {
+        if helper.try_wait().expect("poll PTY drop helper").is_some() {
+            break false;
+        }
+        if Instant::now() >= deadline {
+            helper.kill().expect("kill timed-out PTY drop helper");
+            break true;
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    let output = helper.wait_with_output().expect("collect PTY drop helper");
+    assert!(
+        !timed_out && output.status.success(),
+        "PTY drop helper failed: timed_out={timed_out}, status={}, stdout={}, stderr={}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+#[ignore = "launched in a separate process by the PTY drop regression test"]
+fn drop_with_unread_output_helper() {
+    let temporary = TempDir::new().unwrap();
+    let ready = temporary.path().join("output-written");
+    let args = vec![
+        OsString::from("-c"),
+        // Opening /dev/tty activates controlling-terminal exit draining on
+        // macOS. Sandboxed test runs can deny that open, so retain ordinary
+        // unread-output cleanup coverage when access is unavailable.
+        OsString::from(
+            "true 2>/dev/null <>/dev/tty || true; printf 'unread-terminal-output\\n'; printf ready > \"$1\"",
+        ),
+        OsString::from("pty-drop-helper"),
+        ready.as_os_str().to_owned(),
+    ];
+    let session = PtySession::spawn(OsStr::new("/bin/sh"), &args, TerminalSize::default())
+        .expect("spawn child with unread output");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !ready.exists() {
+        assert!(Instant::now() < deadline, "child did not publish readiness");
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    // No reader is opened. On macOS, the child cannot complete exit while
+    // this unread output remains queued and the master is held open.
+    drop(session);
 }
 
 #[test]
@@ -38,6 +118,11 @@ fn real_pty_supports_arguments_io_resize_and_exit_status() {
     let mut session = PtySession::spawn(program.as_os_str(), &arguments, initial_size).unwrap();
     let mut reader = session.try_clone_reader().unwrap();
     let mut writer = session.take_writer().unwrap();
+    assert_eq!(
+        session.try_wait().unwrap(),
+        None,
+        "child waiting for input must still be running"
+    );
     assert!(
         session.take_writer().is_err(),
         "PTY unexpectedly handed out a second input stream"
@@ -56,6 +141,7 @@ fn real_pty_supports_arguments_io_resize_and_exit_status() {
 
     let mut output = Vec::new();
     reader.read_to_end(&mut output).unwrap();
+    assert_eq!(poll_exit(&mut session), 23);
     let exit_code = session.wait().unwrap();
 
     assert_eq!(exit_code, 23, "nonzero child status must propagate");
@@ -89,6 +175,8 @@ fn real_pty_supports_arguments_io_resize_and_exit_status() {
     terminated_output.read_line(&mut ready).unwrap();
     assert!(ready.contains("long-running-ready"));
     terminated.terminate().unwrap();
+    terminated_output.read_to_end(&mut Vec::new()).unwrap();
+    assert_eq!(poll_exit(&mut terminated), 129);
     let terminated_code = terminated.wait().unwrap();
     assert_eq!(
         terminated_code, 129,

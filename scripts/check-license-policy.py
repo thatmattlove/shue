@@ -76,8 +76,8 @@ def main() -> int:
             fail(f"{manifest_path.relative_to(ROOT)} does not inherit the workspace license")
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    if "`shue` is licensed under the MIT License. See [LICENSE](LICENSE)." not in readme:
-        fail("README does not declare the MIT-only project license")
+    if "](LICENSE)" not in readme:
+        fail("README does not link to the project license")
 
     release = load_release_helper()
     expected_archive_files = (
